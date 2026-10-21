@@ -80,8 +80,8 @@
   <script>
     (() => {
       "use strict";
-      const PAYLOAD_URL = "site.bin?v=8cd507cd26";
-      const ITERATIONS = 600000;
+      const PAYLOAD_URL = "site.bin?v=9f937b3533";
+      const ITERATIONS = 150000;
       const CODE_KEY = "la_entry_code";
       const form = document.getElementById("gate");
       const input = document.getElementById("code");
@@ -97,7 +97,7 @@
 
       // download the encrypted site right away, while the code is being typed.
       // Shows progress, restarts a download that stalls, and retries once.
-      const PAYLOAD_SIZE = 2878755;
+      const PAYLOAD_SIZE = 314525;
       const STALL_MS = 12000;
       let payload = null;
       let loaded = false;
@@ -148,8 +148,6 @@
       }
       loadPayload().catch(() => {});
 
-      const bytes = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
       async function decrypt(code, buf) {
         const salt = new Uint8Array(buf, 0, 16);
         const iv = new Uint8Array(buf, 16, 12);
@@ -164,20 +162,79 @@
         );
         // AES-GCM refuses to decrypt with a wrong key, so a wrong code throws here
         const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
-        return JSON.parse(new TextDecoder().decode(plain));
+        // [uint32 LE header length][header JSON][bytes of the first-paint images]
+        const headerLength = new DataView(plain).getUint32(0, true);
+        const header = JSON.parse(new TextDecoder().decode(new Uint8Array(plain, 4, headerLength)));
+        return { ...header, key, body: new Uint8Array(plain, 4 + headerLength) };
       }
 
-      function render({ html, assets }) {
+      // Images not in the main bundle start as a 1x1 placeholder that carries the real path
+      // after "#", and are fetched + decrypted only when they come near the screen.
+      const PLACEHOLDER = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+      function lazyImages(lazy, key) {
+        const cache = {};
+        const load = (path) =>
+          (cache[path] ||= fetch(lazy[path].file)
+            .then((r) => {
+              if (!r.ok) throw new Error("HTTP " + r.status);
+              return r.arrayBuffer();
+            })
+            .then((buf) => crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(buf, 0, 12) }, key, new Uint8Array(buf, 12)))
+            .then((plain) => URL.createObjectURL(new Blob([plain], { type: lazy[path].type })))
+            .catch((e) => {
+              delete cache[path];
+              throw e;
+            }));
+        const pathOf = (img) => {
+          const src = img.getAttribute("src") || "";
+          return src.startsWith(PLACEHOLDER + "#") ? src.slice(PLACEHOLDER.length + 1) : null;
+        };
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              const img = entry.target;
+              io.unobserve(img);
+              const path = pathOf(img);
+              if (path && lazy[path]) {
+                load(path).then(
+                  (url) => {
+                    if (pathOf(img) === path) img.src = url;
+                  },
+                  () => io.observe(img)
+                );
+              }
+            }
+          },
+          { rootMargin: "600px 0px" }
+        );
+        const scan = (node) => {
+          if (node.nodeType !== 1) return;
+          if (node.tagName === "IMG" && pathOf(node)) io.observe(node);
+          node.querySelectorAll('img[src^="data:image/gif"]').forEach((img) => pathOf(img) && io.observe(img));
+        };
+        scan(document.body);
+        new MutationObserver((records) => {
+          for (const r of records) {
+            if (r.type === "attributes") scan(r.target);
+            else r.addedNodes.forEach(scan);
+          }
+        }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+      }
+
+      function render({ html, assets, lazy, key, body }) {
         const urls = {};
         for (const [path, a] of Object.entries(assets)) {
-          urls[path] = URL.createObjectURL(new Blob([bytes(a.data)], { type: a.type }));
+          urls[path] = URL.createObjectURL(new Blob([body.subarray(a.offset, a.offset + a.length)], { type: a.type }));
         }
-        html = html.replace(/images\/[\w.-]+\.(?:jpg|png)/g, (m) => urls[m] || m);
+        html = html.replace(/images\/[\w.-]+\.(?:webp|png|jpg)/g, (m) => urls[m] || (lazy[m] ? PLACEHOLDER + "#" + m : m));
         const doc = new DOMParser().parseFromString(html, "text/html");
         document.documentElement.lang = doc.documentElement.lang;
         document.documentElement.dir = doc.documentElement.dir;
         document.head.replaceChildren(...doc.head.childNodes);
         document.body.replaceChildren(...doc.body.childNodes);
+        lazyImages(lazy, key);
         // scripts from DOMParser don't run when inserted, so recreate them in order
         for (const old of document.querySelectorAll("script")) {
           const s = document.createElement("script");
