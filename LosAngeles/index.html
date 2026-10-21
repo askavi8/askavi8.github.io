@@ -6,7 +6,6 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0a0a0a">
   <title>Los Angeles | כניסה</title>
-  <link rel="preload" href="site.bin?v=f14ba32d04" as="fetch" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- loaded without blocking the script below, so the entry screen works before the fonts arrive -->
@@ -81,7 +80,7 @@
   <script>
     (() => {
       "use strict";
-      const PAYLOAD_URL = "site.bin?v=f14ba32d04";
+      const PAYLOAD_URL = "site.bin?v=8cd507cd26";
       const ITERATIONS = 600000;
       const CODE_KEY = "la_entry_code";
       const form = document.getElementById("gate");
@@ -96,16 +95,46 @@
         return;
       }
 
-      // start downloading the encrypted site right away, while the code is being typed
+      // download the encrypted site right away, while the code is being typed.
+      // Shows progress, restarts a download that stalls, and retries once.
+      const PAYLOAD_SIZE = 2878755;
+      const STALL_MS = 12000;
       let payload = null;
       let loaded = false;
+      let percent = 0;
+
+      async function download(url) {
+        const ctrl = new AbortController();
+        let timer = setTimeout(() => ctrl.abort(), STALL_MS);
+        const r = await fetch(url, { signal: ctrl.signal });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        if (!r.body || !r.body.getReader) {
+          clearTimeout(timer);
+          return r.arrayBuffer();
+        }
+        const out = new Uint8Array(PAYLOAD_SIZE);
+        const reader = r.body.getReader();
+        let got = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          clearTimeout(timer);
+          timer = setTimeout(() => ctrl.abort(), STALL_MS);
+          if (got + value.length > out.length) throw new Error("unexpected size");
+          out.set(value, got);
+          got += value.length;
+          percent = Math.floor((got / PAYLOAD_SIZE) * 100);
+          if (button.disabled && !loaded) status.textContent = "טוען את האתר… " + percent + "%";
+        }
+        clearTimeout(timer);
+        if (got !== PAYLOAD_SIZE) throw new Error("incomplete download");
+        return out.buffer;
+      }
+
       function loadPayload() {
         if (!payload) {
-          payload = fetch(PAYLOAD_URL)
-            .then((r) => {
-              if (!r.ok) throw new Error("HTTP " + r.status);
-              return r.arrayBuffer();
-            })
+          payload = download(PAYLOAD_URL)
+            .catch(() => download(PAYLOAD_URL + "&retry=" + Date.now()))
             .then((buf) => {
               loaded = true;
               return buf;
@@ -179,13 +208,13 @@
 
       // the whole flow: download (if still needed) → decrypt → show the site
       async function enter(code, fromSaved) {
-        busy(true, loaded ? "" : "טוען את האתר…");
+        busy(true, loaded ? "" : "טוען את האתר… " + percent + "%");
         error.textContent = "";
         let buf;
         try {
           buf = await loadPayload();
         } catch {
-          return fail("לא הצלחנו לטעון את האתר. בדקו את החיבור לאינטרנט ונסו שוב.");
+          return fail("לא הצלחנו לטעון את האתר. לחצו שוב על כניסה כדי לנסות שוב. אם זה חוזר, נסו לפתוח ב-Chrome.");
         }
         let site;
         try {
