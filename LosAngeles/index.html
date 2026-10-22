@@ -80,7 +80,7 @@
   <script>
     (() => {
       "use strict";
-      const PAYLOAD_URL = "site.bin?v=d03027d07c";
+      const PAYLOAD_URL = "site.bin?v=892fbb36dd";
       const ITERATIONS = 150000;
       const CODE_KEY = "la_entry_code";
       const form = document.getElementById("gate");
@@ -97,7 +97,7 @@
 
       // download the encrypted site right away, while the code is being typed.
       // Shows progress, restarts a download that stalls, and retries once.
-      const PAYLOAD_SIZE = 352754;
+      const PAYLOAD_SIZE = 332068;
       const STALL_MS = 12000;
       let payload = null;
       let loaded = false;
@@ -148,29 +148,60 @@
       }
       loadPayload().catch(() => {});
 
-      async function decrypt(code, buf) {
-        const salt = new Uint8Array(buf, 0, 16);
-        const iv = new Uint8Array(buf, 16, 12);
-        const data = new Uint8Array(buf, 28);
+      // the store data (products, deals, …) is a separate small file that the admin panel
+      // rewrites; it is always fetched fresh so changes show up as soon as they are published
+      let data = null;
+      function loadData() {
+        const get = (n) =>
+          fetch("data.bin?t=" + Date.now() + "-" + n, { cache: "no-store" }).then((r) => {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.arrayBuffer();
+          });
+        if (!data) data = get(0).catch(() => get(1)).catch((e) => ((data = null), Promise.reject(e)));
+        return data;
+      }
+      loadData().catch(() => {});
+
+      async function deriveKey(code, salt) {
         const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(code), "PBKDF2", false, ["deriveKey"]);
-        const key = await crypto.subtle.deriveKey(
+        return crypto.subtle.deriveKey(
           { name: "PBKDF2", salt, iterations: ITERATIONS, hash: "SHA-256" },
           base,
           { name: "AES-GCM", length: 256 },
           false,
           ["decrypt"]
         );
-        // AES-GCM refuses to decrypt with a wrong key, so a wrong code throws here
-        const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+      }
+
+      // [16-byte salt][12-byte IV][ciphertext]; AES-GCM refuses a wrong key, so a wrong code throws
+      const unseal = (key, buf) => crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(buf, 16, 12) }, key, new Uint8Array(buf, 28));
+
+      async function decrypt(code, buf) {
+        const key = await deriveKey(code, new Uint8Array(buf, 0, 16));
+        const plain = await unseal(key, buf);
         // [uint32 LE header length][header JSON][bytes of the first-paint images]
         const headerLength = new DataView(plain).getUint32(0, true);
         const header = JSON.parse(new TextDecoder().decode(new Uint8Array(plain, 4, headerLength)));
         return { ...header, key, body: new Uint8Array(plain, 4 + headerLength) };
       }
 
-      // Images not in the main bundle start as a 1x1 placeholder that carries the real path
+      // Product images start as a 1x1 placeholder that carries the encrypted file's path
       // after "#", and are fetched + decrypted only when they come near the screen.
       const PLACEHOLDER = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+      const IMAGE_TYPES = { webp: "image/webp", jpg: "image/jpeg", png: "image/png" };
+
+      function lazyRefs(store) {
+        const lazy = {};
+        const swap = (ref) => {
+          const m = /^i\/[0-9a-f]+\.(webp|jpg|png)\.bin$/.exec(ref || "");
+          if (!m) return ref;
+          lazy[ref] = { type: IMAGE_TYPES[m[1]], file: ref };
+          return PLACEHOLDER + "#" + ref;
+        };
+        for (const c of store.categories || []) c.image = swap(c.image);
+        for (const p of store.products || []) for (const c of p.colors || []) c.image = swap(c.image);
+        return lazy;
+      }
 
       function lazyImages(lazy, key) {
         const cache = {};
@@ -230,12 +261,14 @@
         }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
       }
 
-      function render({ html, assets, lazy, key, body }) {
+      function render({ html, assets, key, body }, store) {
         const urls = {};
         for (const [path, a] of Object.entries(assets)) {
           urls[path] = URL.createObjectURL(new Blob([body.subarray(a.offset, a.offset + a.length)], { type: a.type }));
         }
-        html = html.replace(/images\/[\w.-]+\.(?:webp|png|jpg)/g, (m) => urls[m] || (lazy[m] ? PLACEHOLDER + "#" + m : m));
+        html = html.replace(/images\/[\w.-]+\.(?:webp|png|jpg)/g, (m) => urls[m] || m);
+        const lazy = lazyRefs(store);
+        window.__LA_DATA = store;
         const doc = new DOMParser().parseFromString(html, "text/html");
         document.documentElement.lang = doc.documentElement.lang;
         document.documentElement.dir = doc.documentElement.dir;
@@ -274,9 +307,9 @@
       async function enter(code, fromSaved) {
         busy(true, loaded ? "" : "טוען את האתר… " + percent + "%");
         error.textContent = "";
-        let buf;
+        let buf, dataBuf;
         try {
-          buf = await loadPayload();
+          [buf, dataBuf] = await Promise.all([loadPayload(), loadData()]);
         } catch {
           return fail("לא הצלחנו לטעון את האתר. לחצו שוב על כניסה כדי לנסות שוב. אם זה חוזר, נסו לפתוח ב-Chrome.");
         }
@@ -292,8 +325,10 @@
         }
         try { localStorage.setItem(CODE_KEY, code); } catch { /* not remembered on this device */ }
         try {
-          render(site);
+          const store = JSON.parse(new TextDecoder().decode(await unseal(site.key, dataBuf)));
+          render(site, store);
         } catch (e) {
+          data = null;
           fail("שגיאה בפתיחת האתר: " + (e && e.message ? e.message : e));
         }
       }
