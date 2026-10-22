@@ -80,7 +80,7 @@
   <script>
     (() => {
       "use strict";
-      const PAYLOAD_URL = "site.bin?v=9f937b3533";
+      const PAYLOAD_URL = "site.bin?v=03b8e94abc";
       const ITERATIONS = 150000;
       const CODE_KEY = "la_entry_code";
       const form = document.getElementById("gate");
@@ -97,7 +97,7 @@
 
       // download the encrypted site right away, while the code is being typed.
       // Shows progress, restarts a download that stalls, and retries once.
-      const PAYLOAD_SIZE = 314525;
+      const PAYLOAD_SIZE = 325104;
       const STALL_MS = 12000;
       let payload = null;
       let loaded = false;
@@ -190,20 +190,27 @@
           const src = img.getAttribute("src") || "";
           return src.startsWith(PLACEHOLDER + "#") ? src.slice(PLACEHOLDER.length + 1) : null;
         };
+        const reveal = (img) => {
+          io.unobserve(img);
+          const path = pathOf(img);
+          if (!path || !lazy[path]) return;
+          load(path).then(
+            (url) => {
+              if (pathOf(img) === path) img.src = url;
+            },
+            () => io.observe(img)
+          );
+        };
         const io = new IntersectionObserver(
           (entries) => {
             for (const entry of entries) {
               if (!entry.isIntersecting) continue;
-              const img = entry.target;
-              io.unobserve(img);
-              const path = pathOf(img);
-              if (path && lazy[path]) {
-                load(path).then(
-                  (url) => {
-                    if (pathOf(img) === path) img.src = url;
-                  },
-                  () => io.observe(img)
-                );
+              reveal(entry.target);
+              // in a sideways-scrolling row, also fetch the next few cards so a swipe shows them right away
+              let next = entry.target.closest(".row-scroll > *")?.nextElementSibling;
+              for (let k = 0; next && k < 4; k++, next = next.nextElementSibling) {
+                const img = next.querySelector("img");
+                if (img && pathOf(img)) reveal(img);
               }
             }
           },
