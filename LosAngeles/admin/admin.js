@@ -155,12 +155,15 @@
     return res.status === 204 ? null : res.json();
   }
 
+  // the usual cause: the token was given another repository (e.g. LosAngeles) instead of the one the site is published from
+  const NO_WRITE = `לטוקן אין הרשאת כתיבה למאגר ${CONFIG.repo}. ב-GitHub פותחים את הטוקן ← Edit, וב-Repository access בוחרים את ${CONFIG.repo} עם Contents: Read and write. אותו טוקן ימשיך לעבוד, אין צורך ליצור חדש.`;
+
   function errorText(e) {
     if (e instanceof ApiError) {
       if (e.status === 0) return e.message;
       if (e.status === 401) return "הטוקן של GitHub לא תקף או שפג תוקפו. אפשר להחליף אותו בהגדרות ← אבטחה.";
       if (e.status === 403 && /rate limit/i.test(e.message)) return "יותר מדי בקשות ל-GitHub. נסו שוב בעוד כמה דקות.";
-      if (e.status === 403 || e.status === 404) return "לטוקן אין הרשאה לעדכן את האתר. צריך הרשאת Contents: Read and write.";
+      if (e.status === 403 || e.status === 404) return `${NO_WRITE} (GitHub: ${e.status}${e.message ? ` ${e.message}` : ""})`;
       if (e.status === 409 || e.status === 422) return "האתר עודכן ממכשיר אחר באותו רגע. נסו לשמור שוב.";
       return `שגיאה מ-GitHub (${e.status}). נסו שוב בעוד רגע.`;
     }
@@ -1895,6 +1898,7 @@
           throw new Error("סיסמת הניהול לא נכונה");
         }
         await gh("", { token: token.trim() });
+        await gh("git/blobs", { method: "POST", body: { content: "ok", encoding: "utf-8" }, token: token.trim() });
         const old = S.token;
         S.token = token.trim();
         try {
@@ -2059,6 +2063,8 @@
       S.token = token;
       try {
         await gh("");
+        // a token can read this public repo even without access to it, so check writing too
+        await gh("git/blobs", { method: "POST", body: { content: "ok", encoding: "utf-8" } });
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) throw new Error("הטוקן לא תקף. בדקו שהעתקתם אותו במלואו.");
         throw err;
