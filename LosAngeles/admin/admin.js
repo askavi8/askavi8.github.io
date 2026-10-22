@@ -2057,7 +2057,12 @@
     try {
       authStatus.textContent = "בודק את הטוקן…";
       S.token = token;
-      await gh("");
+      try {
+        await gh("");
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) throw new Error("הטוקן לא תקף. בדקו שהעתקתם אותו במלואו.");
+        throw err;
+      }
       authStatus.textContent = "בודק את קוד הכניסה…";
       try {
         await signIn({ token, code });
