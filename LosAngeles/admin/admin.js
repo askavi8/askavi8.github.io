@@ -690,7 +690,7 @@
     const sales = d.products.filter((p) => p.sale && p.sale.price);
     view.innerHTML = `
       ${pageHead("מבצעים", null, "new-deal", "מבצע חדש")}
-      <p class="page-note">מבצע פעיל מופיע מיד באתר: על המוצרים, בסל ובהודעת ההזמנה בוואטסאפ.</p>
+      <p class="page-note">מבצע פעיל מופיע מיד באתר: על המוצרים, בסל ובתשלום.</p>
       ${
         d.deals.length
           ? `<ul class="list card">${d.deals
@@ -834,6 +834,7 @@
   function renderSettings() {
     if (!SET) {
       const draft = clone(S.data.store);
+      draft.payments = { card: true, bit: true, applePay: true, installments: 3, ...(draft.payments || {}) };
       SET = { draft, snapshot: JSON.stringify(draft) };
     }
     const s = SET.draft;
@@ -848,7 +849,7 @@
         <h3 class="card-title">פרטי החנות</h3>
         <div class="row-2 stack-sm">${field("שם החנות", "name")}${field("שורת תיאור", "tagline")}</div>
         <div class="row-2 stack-sm">
-          ${field("וואטסאפ להזמנות", "whatsapp", 'dir="ltr" inputmode="numeric"', "בפורמט בינלאומי: 972 ואחריו המספר בלי 0")}
+          ${field("וואטסאפ", "whatsapp", 'dir="ltr" inputmode="numeric"', "לשאלות של לקוחות. בפורמט בינלאומי: 972 ואחריו המספר בלי 0")}
           ${field("טלפון", "phone", 'dir="ltr" inputmode="tel"')}
         </div>
         <div class="row-2 stack-sm">${field("כתובת", "address")}${field("אינסטגרם", "instagram", 'dir="ltr"', "שם המשתמש בלבד, בלי @")}</div>
@@ -876,6 +877,16 @@
         </div>
         ${field("זמן אספקה", "shipping.eta")}
         <label class="switch-row"><span class="switch-text"><b>איסוף עצמי מהחנות</b><small>אפשרות לאסוף את ההזמנה במקום משלוח</small></span><input type="checkbox" class="switch" data-sbind="shipping.pickup" ${s.shipping.pickup ? "checked" : ""}></label>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="card-title">אמצעי תשלום<small>מה הלקוח יכול לבחור בהשלמת ההזמנה (באתר לדוגמה התשלום הוא הדגמה בלבד)</small></h3>
+        <label class="switch-row"><span class="switch-text"><b>כרטיס אשראי</b></span><input type="checkbox" class="switch" data-sbind="payments.card" ${s.payments.card ? "checked" : ""}></label>
+        <label class="switch-row"><span class="switch-text"><b>bit</b></span><input type="checkbox" class="switch" data-sbind="payments.bit" ${s.payments.bit ? "checked" : ""}></label>
+        <label class="switch-row"><span class="switch-text"><b>Apple Pay</b></span><input type="checkbox" class="switch" data-sbind="payments.applePay" ${s.payments.applePay ? "checked" : ""}></label>
+        <label class="field" style="margin-top:8px"><span class="field-label">עד כמה תשלומים בכרטיס אשראי</span><select data-sbind="payments.installments" data-num>${[1, 2, 3, 4, 5, 6, 10, 12]
+          .map((n) => `<option value="${n}"${s.payments.installments === n ? " selected" : ""}>${n === 1 ? "בלי תשלומים" : `עד ${n}`}</option>`)
+          .join("")}</select></label>
       </div>
 
       <div class="card card-pad">
@@ -924,6 +935,7 @@
     s.hours = s.hours.filter((h) => h.days.trim() || h.time.trim());
     if (s.whatsapp && !/^\d{10,15}$/.test(s.whatsapp)) return toast("מספר הוואטסאפ צריך להיות בפורמט בינלאומי, למשל 972545861678", true);
     if (s.whatsapp.startsWith("0")) return toast("מספר הוואטסאפ מתחיל ב-972 ולא ב-0", true);
+    if (!s.payments.card && !s.payments.bit && !s.payments.applePay) return toast("צריך להשאיר לפחות אמצעי תשלום אחד", true);
     busyButton(btn, true);
     try {
       const draft = clone(s);
