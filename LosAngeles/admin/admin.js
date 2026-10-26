@@ -835,6 +835,7 @@
     if (!SET) {
       const draft = clone(S.data.store);
       draft.payments = { card: true, bit: true, applePay: true, installments: 3, ...(draft.payments || {}) };
+      draft.accessibility = { coordinator: "", phone: "", email: "", physical: "", updated: "", ...(draft.accessibility || {}) };
       SET = { draft, snapshot: JSON.stringify(draft) };
     }
     const s = SET.draft;
@@ -887,6 +888,21 @@
         <label class="field" style="margin-top:8px"><span class="field-label">עד כמה תשלומים בכרטיס אשראי</span><select data-sbind="payments.installments" data-num>${[1, 2, 3, 4, 5, 6, 10, 12]
           .map((n) => `<option value="${n}"${s.payments.installments === n ? " selected" : ""}>${n === 1 ? "בלי תשלומים" : `עד ${n}`}</option>`)
           .join("")}</select></label>
+      </div>
+
+      <div class="card card-pad stack">
+        <h3 class="card-title">הצהרת נגישות<small>הפרטים שמופיעים בהצהרת הנגישות באתר (לפי תקנות הנגישות). שדה ריק = פרטי החנות</small></h3>
+        <div class="row-2 stack-sm">
+          ${field("רכז/ת נגישות", "accessibility.coordinator", 'placeholder="שם מלא"')}
+          ${field("טלפון לפניות נגישות", "accessibility.phone", `dir="ltr" inputmode="tel" placeholder="${esc(s.phone || "")}"`)}
+        </div>
+        <div class="row-2 stack-sm">
+          ${field("אימייל לפניות נגישות", "accessibility.email", 'dir="ltr" type="email" inputmode="email"')}
+          ${field("תאריך עדכון ההצהרה", "accessibility.updated", 'type="date"')}
+        </div>
+        <label class="field"><span class="field-label">הסדרי נגישות בחנות</span>
+          <textarea data-sbind="accessibility.physical" maxlength="600" placeholder="למשל: כניסה ללא מדרגות, חניית נכים צמודה, עמדת קופה נגישה">${esc(s.accessibility.physical)}</textarea>
+          <span class="field-hint">גישה, חניה, כניסה ושירות בחנות עצמה</span></label>
       </div>
 
       <div class="card card-pad">
